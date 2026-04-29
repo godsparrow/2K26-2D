@@ -1,13 +1,4 @@
 // =======================
-// 🌐 MULTIPLAYER
-// =======================
-const socket = io("https://your-server-url.com"); // change later
-
-let playerId = Math.random().toString(36).substr(2, 9);
-let otherPlayers = {};
-let playerMeshes = {};
-
-// =======================
 // 🎮 SCENE
 // =======================
 const scene = new THREE.Scene();
@@ -21,15 +12,14 @@ renderer.shadowMap.enabled = true;
 document.body.appendChild(renderer.domElement);
 
 // =======================
-// 💡 REALISTIC LIGHTING
+// 💡 LIGHTING
 // =======================
 const light = new THREE.DirectionalLight(0xffffff, 1.5);
 light.position.set(5,10,5);
 light.castShadow = true;
 scene.add(light);
 
-const ambient = new THREE.AmbientLight(0xffffff, 0.4);
-scene.add(ambient);
+scene.add(new THREE.AmbientLight(0xffffff, 0.4));
 
 // =======================
 // 🏀 COURT
@@ -53,10 +43,21 @@ loader.load(
   (gltf)=>{
     player = gltf.scene;
     player.scale.set(0.5,0.5,0.5);
-    player.traverse(obj => obj.castShadow = true);
+    player.traverse(obj=>obj.castShadow=true);
     scene.add(player);
   }
 );
+
+// =======================
+// 🤖 DEFENDER
+// =======================
+const defender = new THREE.Mesh(
+  new THREE.BoxGeometry(1,2,1),
+  new THREE.MeshStandardMaterial({color:0xff0000})
+);
+defender.position.set(5,1,0);
+defender.castShadow = true;
+scene.add(defender);
 
 // =======================
 // 🏀 BALL
@@ -70,7 +71,6 @@ scene.add(ball);
 
 let ballVelocity = new THREE.Vector3();
 let shooting = false;
-let dribbling = true;
 
 // =======================
 // 🥅 HOOP
@@ -107,36 +107,38 @@ document.addEventListener("keydown", e=>keys[e.key]=true);
 document.addEventListener("keyup", e=>keys[e.key]=false);
 
 // =======================
-// 🏀 DRIBBLING SYSTEM
+// 🏀 DRIBBLING
 // =======================
-let dribbleTimer = 0;
+let dribbleTime = 0;
 
 function dribble(){
-  if(!player) return;
-
-  dribbleTimer += 0.2;
-  ball.position.x = player.position.x + Math.sin(dribbleTimer)*0.5;
-  ball.position.y = 0.5 + Math.abs(Math.sin(dribbleTimer*2));
+  dribbleTime += 0.2;
+  ball.position.x = player.position.x + Math.sin(dribbleTime)*0.5;
+  ball.position.y = 0.5 + Math.abs(Math.sin(dribbleTime*2));
   ball.position.z = player.position.z;
 }
 
-// Crossovers
 function crossover(){
   ball.position.x += (Math.random()-0.5)*2;
+
+  // ankle breaker effect
+  if(Math.random() < 0.2){
+    defender.position.x += (Math.random()-0.5)*3;
+  }
 }
 
 // =======================
-// 💥 DUNK SYSTEM
+// 💥 DUNK
 // =======================
 function dunk(){
-  if(!player) return;
-
   let dist = player.position.distanceTo(rim.position);
 
   if(dist < 3){
     shooting = true;
 
-    let dir = new THREE.Vector3().subVectors(rim.position, player.position).normalize();
+    let dir = new THREE.Vector3()
+      .subVectors(rim.position, player.position)
+      .normalize();
 
     ball.position.copy(player.position);
     ballVelocity.copy(dir.multiplyScalar(0.6));
@@ -152,9 +154,11 @@ function dunk(){
 // =======================
 function shoot(){
   shooting = true;
-  dribbling = false;
 
-  let dir = new THREE.Vector3().subVectors(rim.position, ball.position).normalize();
+  let dir = new THREE.Vector3()
+    .subVectors(rim.position, ball.position)
+    .normalize();
+
   ballVelocity.copy(dir.multiplyScalar(0.5));
   ballVelocity.y += 0.3;
 }
@@ -166,9 +170,7 @@ function controller(){
   const gp = navigator.getGamepads()[0];
   if(!gp) return;
 
-  if(player){
-    player.position.x += gp.axes[0]*0.1;
-  }
+  player.position.x += gp.axes[0]*0.1;
 
   if(gp.buttons[0].pressed) shoot();
   if(gp.buttons[1].pressed) crossover();
@@ -176,35 +178,13 @@ function controller(){
 }
 
 // =======================
-// 🌐 MULTIPLAYER
+// 🤖 DEFENDER AI
 // =======================
-socket.on("players", data=> otherPlayers = data);
+function defenderAI(){
+  let dx = player.position.x - defender.position.x;
 
-function sendData(){
-  if(!player) return;
-  socket.emit("updatePlayer", {
-    id:playerId,
-    x:player.position.x,
-    y:player.position.y,
-    z:player.position.z
-  });
-}
-
-function updateOthers(){
-  for(let id in otherPlayers){
-    if(id===playerId) continue;
-
-    if(!playerMeshes[id]){
-      let m = new THREE.Mesh(
-        new THREE.BoxGeometry(1,2,1),
-        new THREE.MeshStandardMaterial()
-      );
-      scene.add(m);
-      playerMeshes[id] = m;
-    }
-
-    let p = otherPlayers[id];
-    playerMeshes[id].position.set(p.x,p.y,p.z);
+  if(Math.abs(dx) > 0.5){
+    defender.position.x += Math.sign(dx)*0.05;
   }
 }
 
@@ -214,7 +194,7 @@ function updateOthers(){
 function update(){
   if(!player) return;
 
-  // Movement
+  // movement
   if(keys["a"]) player.position.x -= 0.1;
   if(keys["d"]) player.position.x += 0.1;
 
@@ -223,8 +203,9 @@ function update(){
   if(keys["e"]) dunk();
 
   controller();
+  defenderAI();
 
-  // Dribble or shoot
+  // ball logic
   if(!shooting){
     dribble();
   } else {
@@ -232,22 +213,18 @@ function update(){
     ballVelocity.y -= 0.02;
   }
 
-  // Score
+  // score
   if(ball.position.distanceTo(rim.position)<0.6){
     addXP(25);
     shooting=false;
-    dribbling=true;
   }
 
-  // Camera
+  // camera
   camera.position.lerp(
     new THREE.Vector3(player.position.x,5,10),
     0.1
   );
   camera.lookAt(player.position);
-
-  sendData();
-  updateOthers();
 }
 
 // =======================
