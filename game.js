@@ -23,15 +23,28 @@ const floor = new THREE.Mesh(
 floor.rotation.x = -Math.PI/2;
 scene.add(floor);
 
-// Player
-const player = new THREE.Mesh(
-  new THREE.BoxGeometry(1,2,1),
-  new THREE.MeshStandardMaterial({color:0x0000ff})
-);
-player.position.y = 1;
-scene.add(player);
+// =======================
+// 🧍 PLAYER MODEL
+// =======================
 
-// Defender
+let player;
+
+const loader = new THREE.GLTFLoader();
+
+loader.load(
+  "https://threejs.org/examples/models/gltf/RobotExpressive/RobotExpressive.glb",
+  function (gltf) {
+    player = gltf.scene;
+    player.scale.set(0.5,0.5,0.5);
+    player.position.set(0,0,0);
+    scene.add(player);
+  }
+);
+
+// =======================
+// 🤖 DEFENDER
+// =======================
+
 const defender = new THREE.Mesh(
   new THREE.BoxGeometry(1,2,1),
   new THREE.MeshStandardMaterial({color:0xff0000})
@@ -39,7 +52,10 @@ const defender = new THREE.Mesh(
 defender.position.set(5,1,0);
 scene.add(defender);
 
-// Ball
+// =======================
+// 🏀 BALL
+// =======================
+
 const ball = new THREE.Mesh(
   new THREE.SphereGeometry(0.3,32,32),
   new THREE.MeshStandardMaterial({color:0xff8c00})
@@ -50,10 +66,10 @@ let ballVelocity = new THREE.Vector3();
 let shooting = false;
 
 // =======================
-// 🥅 HOOP + NET SYSTEM
+// 🥅 HOOP + NET
 // =======================
 
-// Rim (torus = circle)
+// Rim
 const rim = new THREE.Mesh(
   new THREE.TorusGeometry(0.6, 0.05, 16, 100),
   new THREE.MeshStandardMaterial({color:0xff4500})
@@ -70,7 +86,7 @@ const backboard = new THREE.Mesh(
 backboard.position.set(8.7, 3, 0);
 scene.add(backboard);
 
-// Net (simple cone shape)
+// Net
 const net = new THREE.Mesh(
   new THREE.ConeGeometry(0.5, 1, 16, 1, true),
   new THREE.MeshStandardMaterial({
@@ -88,10 +104,13 @@ scene.add(net);
 let shotPower = 0;
 let charging = false;
 
-// Score
 let score = 0;
+let scored = false;
 
-// Controls
+// =======================
+// 🎮 CONTROLS
+// =======================
+
 let keys = {};
 
 document.addEventListener("keydown", e => {
@@ -103,30 +122,63 @@ document.addEventListener("keydown", e => {
 document.addEventListener("keyup", e => {
   keys[e.key] = false;
 
-  if (e.key === " " && charging) {
+  if (e.key === " " && charging && player) {
     shooting = true;
     charging = false;
 
-    // Aim toward rim
+    let perfect = Math.abs(shotPower - 0.5) < 0.08;
+
     let direction = new THREE.Vector3()
       .subVectors(rim.position, ball.position)
       .normalize();
 
-    let perfect = Math.abs(shotPower - 0.5) < 0.08;
-    let powerMultiplier = perfect ? 1.2 : 0.9;
+    if (perfect) {
+      ballVelocity.copy(direction.multiplyScalar(0.5));
+      ballVelocity.y += 0.3;
+    } else {
+      let missOffset = (Math.random() - 0.5) * 0.5;
+      direction.x += missOffset;
 
-    ballVelocity.copy(direction.multiplyScalar(0.4 * powerMultiplier));
-    ballVelocity.y += 0.25 * shotPower * 2;
+      ballVelocity.copy(direction.multiplyScalar(0.4));
+      ballVelocity.y += 0.25;
+    }
 
     shotPower = 0;
   }
 });
 
 // =======================
-// 🔄 UPDATE LOOP
+// 🧯 SCORE CHECK
+// =======================
+
+function checkScore() {
+  if (
+    ball.position.y > rim.position.y &&
+    ball.position.distanceTo(rim.position) < 0.6
+  ) {
+    scored = true;
+  }
+
+  if (
+    scored &&
+    ball.position.y < rim.position.y - 0.5
+  ) {
+    score++;
+    console.log("SWISH 🟢 SCORE:", score);
+
+    scored = false;
+    shooting = false;
+    ballVelocity.set(0,0,0);
+  }
+}
+
+// =======================
+// 🔄 UPDATE
 // =======================
 
 function update() {
+
+  if (!player) return;
 
   // Movement
   if (keys["a"]) player.position.x -= 0.1;
@@ -138,7 +190,7 @@ function update() {
     if (shotPower > 1) shotPower = 0;
   }
 
-  // Ball follow player
+  // Ball follow
   if (!shooting) {
     ball.position.copy(player.position);
     ball.position.y += 1;
@@ -153,13 +205,29 @@ function update() {
     ballVelocity.set(0,0,0);
   }
 
-  // 🧮 SCORING
-  let dist = ball.position.distanceTo(rim.position);
+  // Score
+  checkScore();
 
-  if (dist < 0.7 && shooting) {
-    score++;
-    console.log("SCORE:", score);
-    shooting = false;
+  // 🖐️ BLOCK
+  if (shooting) {
+    let dist = ball.position.distanceTo(defender.position);
+
+    if (dist < 1.2 && ball.position.y > 1.5) {
+      console.log("BLOCKED ❌");
+      ballVelocity.x *= -0.5;
+      ballVelocity.y = 0.1;
+    }
+  }
+
+  // 🟡 STEAL
+  if (!shooting) {
+    let dist = player.position.distanceTo(defender.position);
+
+    if (dist < 1 && Math.random() < 0.01) {
+      console.log("STOLEN 🖐️");
+      ball.position.copy(defender.position);
+      ball.position.y += 1;
+    }
   }
 
   // 🤖 DEFENDER AI
@@ -178,7 +246,7 @@ function update() {
     }
   }
 
-  // 🎮 CAMERA SMOOTH FOLLOW
+  // 🎮 CAMERA
   camera.position.lerp(
     new THREE.Vector3(player.position.x, 5, 10),
     0.1
@@ -208,7 +276,7 @@ fill.style.background = "lime";
 meter.appendChild(fill);
 
 // =======================
-// 🔁 ANIMATE LOOP
+// 🔁 ANIMATE
 // =======================
 
 function animate() {
