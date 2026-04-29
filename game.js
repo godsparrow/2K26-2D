@@ -31,7 +31,7 @@ const player = new THREE.Mesh(
 player.position.y = 1;
 scene.add(player);
 
-// Defender (AI)
+// Defender
 const defender = new THREE.Mesh(
   new THREE.BoxGeometry(1,2,1),
   new THREE.MeshStandardMaterial({color:0xff0000})
@@ -49,97 +49,148 @@ scene.add(ball);
 let ballVelocity = new THREE.Vector3();
 let shooting = false;
 
-// Hoop
-const hoop = new THREE.Mesh(
-  new THREE.BoxGeometry(0.1,2,2),
+// =======================
+// 🥅 HOOP + NET SYSTEM
+// =======================
+
+// Rim (torus = circle)
+const rim = new THREE.Mesh(
+  new THREE.TorusGeometry(0.6, 0.05, 16, 100),
+  new THREE.MeshStandardMaterial({color:0xff4500})
+);
+rim.rotation.x = Math.PI / 2;
+rim.position.set(8, 3, 0);
+scene.add(rim);
+
+// Backboard
+const backboard = new THREE.Mesh(
+  new THREE.BoxGeometry(0.1, 2, 2),
   new THREE.MeshStandardMaterial({color:0xffffff})
 );
-hoop.position.set(8,3,0);
-scene.add(hoop);
+backboard.position.set(8.7, 3, 0);
+scene.add(backboard);
 
-// Shot Meter
+// Net (simple cone shape)
+const net = new THREE.Mesh(
+  new THREE.ConeGeometry(0.5, 1, 16, 1, true),
+  new THREE.MeshStandardMaterial({
+    color: 0xffffff,
+    wireframe: true
+  })
+);
+net.position.set(8, 2.4, 0);
+scene.add(net);
+
+// =======================
+// 🎯 SHOT SYSTEM
+// =======================
+
 let shotPower = 0;
 let charging = false;
 
+// Score
+let score = 0;
+
 // Controls
 let keys = {};
+
 document.addEventListener("keydown", e => {
   keys[e.key] = true;
 
   if (e.key === " ") charging = true;
 });
+
 document.addEventListener("keyup", e => {
   keys[e.key] = false;
 
-  // RELEASE SHOT
   if (e.key === " " && charging) {
     shooting = true;
     charging = false;
 
-    // GREEN WINDOW (perfect release)
-    let perfect = shotPower > 0.45 && shotPower < 0.55;
+    // Aim toward rim
+    let direction = new THREE.Vector3()
+      .subVectors(rim.position, ball.position)
+      .normalize();
 
-    let powerMultiplier = perfect ? 1.2 : 0.8;
+    let perfect = Math.abs(shotPower - 0.5) < 0.08;
+    let powerMultiplier = perfect ? 1.2 : 0.9;
 
-    ballVelocity.set(
-      0.25 * powerMultiplier,
-      0.35 * shotPower * 2,
-      0
-    );
+    ballVelocity.copy(direction.multiplyScalar(0.4 * powerMultiplier));
+    ballVelocity.y += 0.25 * shotPower * 2;
 
     shotPower = 0;
   }
 });
 
-// Update
+// =======================
+// 🔄 UPDATE LOOP
+// =======================
+
 function update() {
+
   // Movement
   if (keys["a"]) player.position.x -= 0.1;
   if (keys["d"]) player.position.x += 0.1;
 
-  // Shot meter charge
+  // Shot charge
   if (charging) {
     shotPower += 0.01;
     if (shotPower > 1) shotPower = 0;
   }
 
-  // Ball follow
+  // Ball follow player
   if (!shooting) {
     ball.position.copy(player.position);
     ball.position.y += 1;
   } else {
     ball.position.add(ballVelocity);
-    ballVelocity.y -= 0.015; // gravity (arc physics)
+    ballVelocity.y -= 0.015;
   }
 
   // Reset ball
   if (ball.position.y < 0) {
     shooting = false;
+    ballVelocity.set(0,0,0);
   }
 
-  // AI DEFENDER follows you
-  let dx = player.position.x - defender.position.x;
-  defender.position.x += dx * 0.02;
+  // 🧮 SCORING
+  let dist = ball.position.distanceTo(rim.position);
 
-  // ANKLE BREAKER (quick move)
+  if (dist < 0.7 && shooting) {
+    score++;
+    console.log("SCORE:", score);
+    shooting = false;
+  }
+
+  // 🤖 DEFENDER AI
+  let dx = player.position.x - defender.position.x;
+
+  if (Math.abs(dx) > 0.5) {
+    defender.position.x += Math.sign(dx) * 0.05;
+  }
+
+  // 💥 ANKLE BREAKER
   if (keys["Shift"]) {
     player.position.x += (Math.random() - 0.5) * 0.5;
 
-    // chance to stun defender
     if (Math.random() < 0.05) {
       defender.position.x += (Math.random() - 0.5) * 3;
     }
   }
 
-  // CAMERA FOLLOW
-  camera.position.x = player.position.x;
-  camera.position.y = 5;
-  camera.position.z = 10;
+  // 🎮 CAMERA SMOOTH FOLLOW
+  camera.position.lerp(
+    new THREE.Vector3(player.position.x, 5, 10),
+    0.1
+  );
 
   camera.lookAt(player.position);
 }
 
-// Draw Shot Meter (HTML overlay)
+// =======================
+// 🎯 SHOT METER UI
+// =======================
+
 const meter = document.createElement("div");
 meter.style.position = "absolute";
 meter.style.bottom = "50px";
@@ -156,7 +207,10 @@ fill.style.width = "0%";
 fill.style.background = "lime";
 meter.appendChild(fill);
 
-// Animate
+// =======================
+// 🔁 ANIMATE LOOP
+// =======================
+
 function animate() {
   requestAnimationFrame(animate);
 
