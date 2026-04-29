@@ -1,52 +1,59 @@
 // =======================
-// 🌐 MULTIPLAYER SETUP
+// 🌐 MULTIPLAYER
 // =======================
-
-const socket = io("https://your-server-url.com"); // CHANGE THIS
+const socket = io("https://your-server-url.com"); // change later
 
 let playerId = Math.random().toString(36).substr(2, 9);
 let otherPlayers = {};
+let playerMeshes = {};
 
 // =======================
-// 🎮 SCENE SETUP
+// 🎮 SCENE
 // =======================
-
 const scene = new THREE.Scene();
-scene.background = new THREE.Color(0x222222);
+scene.background = new THREE.Color(0x111111);
 
 const camera = new THREE.PerspectiveCamera(75, window.innerWidth/window.innerHeight, 0.1, 1000);
 
-const renderer = new THREE.WebGLRenderer();
+const renderer = new THREE.WebGLRenderer({antialias:true});
 renderer.setSize(window.innerWidth, window.innerHeight);
+renderer.shadowMap.enabled = true;
 document.body.appendChild(renderer.domElement);
 
-// Light
-const light = new THREE.DirectionalLight(0xffffff, 1);
+// =======================
+// 💡 REALISTIC LIGHTING
+// =======================
+const light = new THREE.DirectionalLight(0xffffff, 1.5);
 light.position.set(5,10,5);
+light.castShadow = true;
 scene.add(light);
 
-// Floor
+const ambient = new THREE.AmbientLight(0xffffff, 0.4);
+scene.add(ambient);
+
+// =======================
+// 🏀 COURT
+// =======================
 const floor = new THREE.Mesh(
   new THREE.PlaneGeometry(30,15),
-  new THREE.MeshStandardMaterial({color:0xc47a2c})
+  new THREE.MeshStandardMaterial({color:0xb5651d})
 );
 floor.rotation.x = -Math.PI/2;
+floor.receiveShadow = true;
 scene.add(floor);
 
 // =======================
-// 🧍 PLAYER MODEL
+// 🧍 PLAYER
 // =======================
-
 let player;
-
 const loader = new THREE.GLTFLoader();
 
 loader.load(
   "https://threejs.org/examples/models/gltf/RobotExpressive/RobotExpressive.glb",
-  (gltf) => {
+  (gltf)=>{
     player = gltf.scene;
     player.scale.set(0.5,0.5,0.5);
-    player.position.set(0,0,0);
+    player.traverse(obj => obj.castShadow = true);
     scene.add(player);
   }
 );
@@ -54,22 +61,22 @@ loader.load(
 // =======================
 // 🏀 BALL
 // =======================
-
 const ball = new THREE.Mesh(
   new THREE.SphereGeometry(0.3,32,32),
   new THREE.MeshStandardMaterial({color:0xff8c00})
 );
+ball.castShadow = true;
 scene.add(ball);
 
 let ballVelocity = new THREE.Vector3();
 let shooting = false;
+let dribbling = true;
 
 // =======================
 // 🥅 HOOP
 // =======================
-
 const rim = new THREE.Mesh(
-  new THREE.TorusGeometry(0.6, 0.05, 16, 100),
+  new THREE.TorusGeometry(0.6,0.05,16,100),
   new THREE.MeshStandardMaterial({color:0xff4500})
 );
 rim.rotation.x = Math.PI/2;
@@ -77,170 +84,178 @@ rim.position.set(10,3,0);
 scene.add(rim);
 
 // =======================
-// 📊 MYCAREER SYSTEM
+// 📊 MYCAREER
 // =======================
+let level = 1, xp = 0, nextXP = 100;
 
-let level = 1;
-let xp = 0;
-let nextLevelXP = 100;
-
-function addXP(amount) {
-  xp += amount;
-
-  if (xp >= nextLevelXP) {
+function addXP(val){
+  xp += val;
+  if(xp >= nextXP){
     level++;
     xp = 0;
-    nextLevelXP += 50;
-    console.log("LEVEL UP 🔥", level);
+    nextXP += 50;
   }
+  document.getElementById("level").innerText = "Level: " + level;
+  document.getElementById("xp").innerText = "XP: " + xp;
 }
 
 // =======================
-// 🎮 KEYBOARD CONTROLS
+// 🎮 INPUT
 // =======================
-
 let keys = {};
-
-document.addEventListener("keydown", e => keys[e.key] = true);
-document.addEventListener("keyup", e => keys[e.key] = false);
+document.addEventListener("keydown", e=>keys[e.key]=true);
+document.addEventListener("keyup", e=>keys[e.key]=false);
 
 // =======================
-// 🎮 CONTROLLER SUPPORT
+// 🏀 DRIBBLING SYSTEM
 // =======================
+let dribbleTimer = 0;
 
-function getControllerInput() {
-  const gamepads = navigator.getGamepads();
-  if (!gamepads[0]) return;
+function dribble(){
+  if(!player) return;
 
-  const gp = gamepads[0];
+  dribbleTimer += 0.2;
+  ball.position.x = player.position.x + Math.sin(dribbleTimer)*0.5;
+  ball.position.y = 0.5 + Math.abs(Math.sin(dribbleTimer*2));
+  ball.position.z = player.position.z;
+}
 
-  // Left stick movement
-  let moveX = gp.axes[0];
+// Crossovers
+function crossover(){
+  ball.position.x += (Math.random()-0.5)*2;
+}
 
-  if (player) {
-    player.position.x += moveX * 0.1;
-  }
+// =======================
+// 💥 DUNK SYSTEM
+// =======================
+function dunk(){
+  if(!player) return;
 
-  // Shoot (A button)
-  if (gp.buttons[0].pressed && !shooting) {
-    shootBall();
+  let dist = player.position.distanceTo(rim.position);
+
+  if(dist < 3){
+    shooting = true;
+
+    let dir = new THREE.Vector3().subVectors(rim.position, player.position).normalize();
+
+    ball.position.copy(player.position);
+    ballVelocity.copy(dir.multiplyScalar(0.6));
+    ballVelocity.y = 0.5;
+
+    addXP(50);
+    console.log("DUNK 💥");
   }
 }
 
 // =======================
-// 🎯 SHOOTING
+// 🎯 SHOOT
 // =======================
-
-function shootBall() {
+function shoot(){
   shooting = true;
+  dribbling = false;
 
-  let dir = new THREE.Vector3()
-    .subVectors(rim.position, ball.position)
-    .normalize();
-
+  let dir = new THREE.Vector3().subVectors(rim.position, ball.position).normalize();
   ballVelocity.copy(dir.multiplyScalar(0.5));
   ballVelocity.y += 0.3;
 }
 
 // =======================
-// 🌐 MULTIPLAYER SYNC
+// 🎮 CONTROLLER
 // =======================
+function controller(){
+  const gp = navigator.getGamepads()[0];
+  if(!gp) return;
 
-socket.on("players", (players) => {
-  otherPlayers = players;
-});
+  if(player){
+    player.position.x += gp.axes[0]*0.1;
+  }
 
-function sendPlayerData() {
-  if (!player) return;
+  if(gp.buttons[0].pressed) shoot();
+  if(gp.buttons[1].pressed) crossover();
+  if(gp.buttons[2].pressed) dunk();
+}
 
+// =======================
+// 🌐 MULTIPLAYER
+// =======================
+socket.on("players", data=> otherPlayers = data);
+
+function sendData(){
+  if(!player) return;
   socket.emit("updatePlayer", {
-    id: playerId,
-    x: player.position.x,
-    y: player.position.y,
-    z: player.position.z
+    id:playerId,
+    x:player.position.x,
+    y:player.position.y,
+    z:player.position.z
   });
 }
 
-// =======================
-// 👥 RENDER OTHER PLAYERS
-// =======================
+function updateOthers(){
+  for(let id in otherPlayers){
+    if(id===playerId) continue;
 
-let playerMeshes = {};
-
-function updateOtherPlayers() {
-  for (let id in otherPlayers) {
-    if (id === playerId) continue;
-
-    if (!playerMeshes[id]) {
-      const mesh = new THREE.Mesh(
+    if(!playerMeshes[id]){
+      let m = new THREE.Mesh(
         new THREE.BoxGeometry(1,2,1),
-        new THREE.MeshStandardMaterial({color:0x00ffcc})
+        new THREE.MeshStandardMaterial()
       );
-      scene.add(mesh);
-      playerMeshes[id] = mesh;
+      scene.add(m);
+      playerMeshes[id] = m;
     }
 
     let p = otherPlayers[id];
-    playerMeshes[id].position.set(p.x, p.y, p.z);
+    playerMeshes[id].position.set(p.x,p.y,p.z);
   }
 }
 
 // =======================
-// 🔄 UPDATE LOOP
+// 🔄 UPDATE
 // =======================
+function update(){
+  if(!player) return;
 
-function update() {
+  // Movement
+  if(keys["a"]) player.position.x -= 0.1;
+  if(keys["d"]) player.position.x += 0.1;
 
-  if (!player) return;
+  if(keys["Shift"]) crossover();
+  if(keys[" "]) shoot();
+  if(keys["e"]) dunk();
 
-  // Keyboard movement
-  if (keys["a"]) player.position.x -= 0.1;
-  if (keys["d"]) player.position.x += 0.1;
+  controller();
 
-  if (keys[" "]) shootBall();
-
-  // Controller
-  getControllerInput();
-
-  // Ball follow
-  if (!shooting) {
-    ball.position.copy(player.position);
-    ball.position.y += 1;
+  // Dribble or shoot
+  if(!shooting){
+    dribble();
   } else {
     ball.position.add(ballVelocity);
-    ballVelocity.y -= 0.015;
+    ballVelocity.y -= 0.02;
   }
 
-  // Score detection
-  if (ball.position.distanceTo(rim.position) < 0.6) {
+  // Score
+  if(ball.position.distanceTo(rim.position)<0.6){
     addXP(25);
-    shooting = false;
-    ballVelocity.set(0,0,0);
+    shooting=false;
+    dribbling=true;
   }
 
   // Camera
   camera.position.lerp(
-    new THREE.Vector3(player.position.x, 5, 10),
+    new THREE.Vector3(player.position.x,5,10),
     0.1
   );
-
   camera.lookAt(player.position);
 
-  // Multiplayer
-  sendPlayerData();
-  updateOtherPlayers();
+  sendData();
+  updateOthers();
 }
 
 // =======================
-// 🔁 ANIMATE
+// 🔁 LOOP
 // =======================
-
-function animate() {
+function animate(){
   requestAnimationFrame(animate);
-
   update();
-
-  renderer.render(scene, camera);
+  renderer.render(scene,camera);
 }
-
 animate();
