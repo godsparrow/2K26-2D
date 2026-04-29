@@ -1,11 +1,21 @@
-// Scene
+// =======================
+// 🌐 MULTIPLAYER SETUP
+// =======================
+
+const socket = io("https://your-server-url.com"); // CHANGE THIS
+
+let playerId = Math.random().toString(36).substr(2, 9);
+let otherPlayers = {};
+
+// =======================
+// 🎮 SCENE SETUP
+// =======================
+
 const scene = new THREE.Scene();
 scene.background = new THREE.Color(0x222222);
 
-// Camera
 const camera = new THREE.PerspectiveCamera(75, window.innerWidth/window.innerHeight, 0.1, 1000);
 
-// Renderer
 const renderer = new THREE.WebGLRenderer();
 renderer.setSize(window.innerWidth, window.innerHeight);
 document.body.appendChild(renderer.domElement);
@@ -17,7 +27,7 @@ scene.add(light);
 
 // Floor
 const floor = new THREE.Mesh(
-  new THREE.PlaneGeometry(20,10),
+  new THREE.PlaneGeometry(30,15),
   new THREE.MeshStandardMaterial({color:0xc47a2c})
 );
 floor.rotation.x = -Math.PI/2;
@@ -33,24 +43,13 @@ const loader = new THREE.GLTFLoader();
 
 loader.load(
   "https://threejs.org/examples/models/gltf/RobotExpressive/RobotExpressive.glb",
-  function (gltf) {
+  (gltf) => {
     player = gltf.scene;
     player.scale.set(0.5,0.5,0.5);
     player.position.set(0,0,0);
     scene.add(player);
   }
 );
-
-// =======================
-// 🤖 DEFENDER
-// =======================
-
-const defender = new THREE.Mesh(
-  new THREE.BoxGeometry(1,2,1),
-  new THREE.MeshStandardMaterial({color:0xff0000})
-);
-defender.position.set(5,1,0);
-scene.add(defender);
 
 // =======================
 // 🏀 BALL
@@ -66,129 +65,142 @@ let ballVelocity = new THREE.Vector3();
 let shooting = false;
 
 // =======================
-// 🥅 HOOP + NET
+// 🥅 HOOP
 // =======================
 
-// Rim
 const rim = new THREE.Mesh(
   new THREE.TorusGeometry(0.6, 0.05, 16, 100),
   new THREE.MeshStandardMaterial({color:0xff4500})
 );
-rim.rotation.x = Math.PI / 2;
-rim.position.set(8, 3, 0);
+rim.rotation.x = Math.PI/2;
+rim.position.set(10,3,0);
 scene.add(rim);
 
-// Backboard
-const backboard = new THREE.Mesh(
-  new THREE.BoxGeometry(0.1, 2, 2),
-  new THREE.MeshStandardMaterial({color:0xffffff})
-);
-backboard.position.set(8.7, 3, 0);
-scene.add(backboard);
-
-// Net
-const net = new THREE.Mesh(
-  new THREE.ConeGeometry(0.5, 1, 16, 1, true),
-  new THREE.MeshStandardMaterial({
-    color: 0xffffff,
-    wireframe: true
-  })
-);
-net.position.set(8, 2.4, 0);
-scene.add(net);
-
 // =======================
-// 🎯 SHOT SYSTEM
+// 📊 MYCAREER SYSTEM
 // =======================
 
-let shotPower = 0;
-let charging = false;
+let level = 1;
+let xp = 0;
+let nextLevelXP = 100;
 
-let score = 0;
-let scored = false;
+function addXP(amount) {
+  xp += amount;
 
-// =======================
-// 🎮 CONTROLS
-// =======================
-
-let keys = {};
-
-document.addEventListener("keydown", e => {
-  keys[e.key] = true;
-
-  if (e.key === " ") charging = true;
-});
-
-document.addEventListener("keyup", e => {
-  keys[e.key] = false;
-
-  if (e.key === " " && charging && player) {
-    shooting = true;
-    charging = false;
-
-    let perfect = Math.abs(shotPower - 0.5) < 0.08;
-
-    let direction = new THREE.Vector3()
-      .subVectors(rim.position, ball.position)
-      .normalize();
-
-    if (perfect) {
-      ballVelocity.copy(direction.multiplyScalar(0.5));
-      ballVelocity.y += 0.3;
-    } else {
-      let missOffset = (Math.random() - 0.5) * 0.5;
-      direction.x += missOffset;
-
-      ballVelocity.copy(direction.multiplyScalar(0.4));
-      ballVelocity.y += 0.25;
-    }
-
-    shotPower = 0;
-  }
-});
-
-// =======================
-// 🧯 SCORE CHECK
-// =======================
-
-function checkScore() {
-  if (
-    ball.position.y > rim.position.y &&
-    ball.position.distanceTo(rim.position) < 0.6
-  ) {
-    scored = true;
-  }
-
-  if (
-    scored &&
-    ball.position.y < rim.position.y - 0.5
-  ) {
-    score++;
-    console.log("SWISH 🟢 SCORE:", score);
-
-    scored = false;
-    shooting = false;
-    ballVelocity.set(0,0,0);
+  if (xp >= nextLevelXP) {
+    level++;
+    xp = 0;
+    nextLevelXP += 50;
+    console.log("LEVEL UP 🔥", level);
   }
 }
 
 // =======================
-// 🔄 UPDATE
+// 🎮 KEYBOARD CONTROLS
+// =======================
+
+let keys = {};
+
+document.addEventListener("keydown", e => keys[e.key] = true);
+document.addEventListener("keyup", e => keys[e.key] = false);
+
+// =======================
+// 🎮 CONTROLLER SUPPORT
+// =======================
+
+function getControllerInput() {
+  const gamepads = navigator.getGamepads();
+  if (!gamepads[0]) return;
+
+  const gp = gamepads[0];
+
+  // Left stick movement
+  let moveX = gp.axes[0];
+
+  if (player) {
+    player.position.x += moveX * 0.1;
+  }
+
+  // Shoot (A button)
+  if (gp.buttons[0].pressed && !shooting) {
+    shootBall();
+  }
+}
+
+// =======================
+// 🎯 SHOOTING
+// =======================
+
+function shootBall() {
+  shooting = true;
+
+  let dir = new THREE.Vector3()
+    .subVectors(rim.position, ball.position)
+    .normalize();
+
+  ballVelocity.copy(dir.multiplyScalar(0.5));
+  ballVelocity.y += 0.3;
+}
+
+// =======================
+// 🌐 MULTIPLAYER SYNC
+// =======================
+
+socket.on("players", (players) => {
+  otherPlayers = players;
+});
+
+function sendPlayerData() {
+  if (!player) return;
+
+  socket.emit("updatePlayer", {
+    id: playerId,
+    x: player.position.x,
+    y: player.position.y,
+    z: player.position.z
+  });
+}
+
+// =======================
+// 👥 RENDER OTHER PLAYERS
+// =======================
+
+let playerMeshes = {};
+
+function updateOtherPlayers() {
+  for (let id in otherPlayers) {
+    if (id === playerId) continue;
+
+    if (!playerMeshes[id]) {
+      const mesh = new THREE.Mesh(
+        new THREE.BoxGeometry(1,2,1),
+        new THREE.MeshStandardMaterial({color:0x00ffcc})
+      );
+      scene.add(mesh);
+      playerMeshes[id] = mesh;
+    }
+
+    let p = otherPlayers[id];
+    playerMeshes[id].position.set(p.x, p.y, p.z);
+  }
+}
+
+// =======================
+// 🔄 UPDATE LOOP
 // =======================
 
 function update() {
 
   if (!player) return;
 
-  // Movement
+  // Keyboard movement
   if (keys["a"]) player.position.x -= 0.1;
   if (keys["d"]) player.position.x += 0.1;
 
-  // Shot charge
-  if (charging) {
-    shotPower += 0.01;
-    if (shotPower > 1) shotPower = 0;
-  }
+  if (keys[" "]) shootBall();
+
+  // Controller
+  getControllerInput();
 
   // Ball follow
   if (!shooting) {
@@ -199,81 +211,25 @@ function update() {
     ballVelocity.y -= 0.015;
   }
 
-  // Reset ball
-  if (ball.position.y < 0) {
+  // Score detection
+  if (ball.position.distanceTo(rim.position) < 0.6) {
+    addXP(25);
     shooting = false;
     ballVelocity.set(0,0,0);
   }
 
-  // Score
-  checkScore();
-
-  // 🖐️ BLOCK
-  if (shooting) {
-    let dist = ball.position.distanceTo(defender.position);
-
-    if (dist < 1.2 && ball.position.y > 1.5) {
-      console.log("BLOCKED ❌");
-      ballVelocity.x *= -0.5;
-      ballVelocity.y = 0.1;
-    }
-  }
-
-  // 🟡 STEAL
-  if (!shooting) {
-    let dist = player.position.distanceTo(defender.position);
-
-    if (dist < 1 && Math.random() < 0.01) {
-      console.log("STOLEN 🖐️");
-      ball.position.copy(defender.position);
-      ball.position.y += 1;
-    }
-  }
-
-  // 🤖 DEFENDER AI
-  let dx = player.position.x - defender.position.x;
-
-  if (Math.abs(dx) > 0.5) {
-    defender.position.x += Math.sign(dx) * 0.05;
-  }
-
-  // 💥 ANKLE BREAKER
-  if (keys["Shift"]) {
-    player.position.x += (Math.random() - 0.5) * 0.5;
-
-    if (Math.random() < 0.05) {
-      defender.position.x += (Math.random() - 0.5) * 3;
-    }
-  }
-
-  // 🎮 CAMERA
+  // Camera
   camera.position.lerp(
     new THREE.Vector3(player.position.x, 5, 10),
     0.1
   );
 
   camera.lookAt(player.position);
+
+  // Multiplayer
+  sendPlayerData();
+  updateOtherPlayers();
 }
-
-// =======================
-// 🎯 SHOT METER UI
-// =======================
-
-const meter = document.createElement("div");
-meter.style.position = "absolute";
-meter.style.bottom = "50px";
-meter.style.left = "50%";
-meter.style.transform = "translateX(-50%)";
-meter.style.width = "200px";
-meter.style.height = "20px";
-meter.style.background = "gray";
-document.body.appendChild(meter);
-
-const fill = document.createElement("div");
-fill.style.height = "100%";
-fill.style.width = "0%";
-fill.style.background = "lime";
-meter.appendChild(fill);
 
 // =======================
 // 🔁 ANIMATE
@@ -283,8 +239,6 @@ function animate() {
   requestAnimationFrame(animate);
 
   update();
-
-  fill.style.width = (shotPower * 100) + "%";
 
   renderer.render(scene, camera);
 }
